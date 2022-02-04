@@ -1,5 +1,9 @@
-from MySocked import Socket
 import asyncio
+import settings
+
+from MySocked import Socket
+
+from exceptions import SocketException
 
 
 class Server(Socket):
@@ -9,29 +13,28 @@ class Server(Socket):
         self.users = []
 
     def set_up(self):
-        self.socket.bind(('127.0.0.1', 8000))
+        self.socket.bind(settings.SERVER_ADDRESS)
 
         self.socket.listen(5)
         self.socket.setblocking(False)
         print('Server is listened')
 
-    async def send_data(self, data=None):
+    async def send_data(self, **kwargs):
         for user in self.users:
-            await self.main_loop.sock_sendall(user, data)
+            try:
+                await super(Server, self).send_data(where=user, data=kwargs['data'])
+            except SocketException as exc:
+                print(exc)
+                user.close()
 
     async def listen_socket(self, listened_socket=None):
-        if not listened_socket:
-            return
-
         while True:
             try:
-                data = await self.main_loop.sock_recv(listened_socket, 2048)
-                print(data.decode('utf-8'))
-                await self.send_data(data)
-            except Exception:
-                print('Client removed')
-                self.users.remove(listened_socket)
-                return
+                data = await super(Server, self).listen_socket(listened_socket)
+                await self.send_data(data=data['data'])
+            except SocketException as exc:
+                print(exc)
+                listened_socket.close()
 
     async def accept_sockets(self):
         while True:

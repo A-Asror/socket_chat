@@ -1,9 +1,15 @@
+import asyncio
+import json
+
+import settings
+
 from datetime import datetime
 from os import system
-import asyncio
+from sys import platform
 
 from MySocked import Socket
 from Encrypt import Encryptor
+from exceptions import SocketException
 
 
 class Client(Socket):
@@ -15,30 +21,52 @@ class Client(Socket):
 
     def set_up(self):
         try:
-            self.socket.connect(("127.0.0.1", 8000))
+            self.socket.connect(settings.SERVER_ADDRESS)
             self.socket.setblocking(False)
         except ConnectionRefusedError:
             print('Sorry server is offline')
             exit(0)
 
-    async def listen_socket(self, listened_socked=None):
+    async def listen_socket(self, listened_socked):
         while True:
-            data = await self.main_loop.sock_recv(self.socket, 2048)
-            client_data = self.encryptor.decrypt(data.decode('utf-8'))
-            self.messages += f'{datetime.now().date()}: {client_data}\n'
+            if not self.is_working:
+                return
+            try:
+                data = await super(Client, self).listen_socket(listened_socked)
+            except SocketException as exc:
+                print(exc)
+                self.is_working = False
+                continue
 
-            system('cls')
+            decrypted_data = json.loads(self.encryptor.decrypt(data['data']))
+            self.messages += f'{decrypted_data["message_time"]}: {decrypted_data["message_text"]}\n'
+
+            if platform == 'win32':
+                system('cls')
+            else:
+                system('clear')
             print(self.messages)
 
     async def send_data(self, data=None):
         while True:
-            data = await self.main_loop.run_in_executor(None, input)
-            encrypted_data = self.encryptor.encrypt(data)
-            await self.main_loop.sock_sendall(self.socket, encrypted_data.encode('utf-8'))
+            message = await self.main_loop.run_in_executor(None, input)
+            if not self.is_working:
+                return
+
+            current = datetime.now()
+
+            encrypted_data = self.encryptor.encrypt(json.dumps(
+                {
+                    'message_text': message,
+                    'message_time': f'{current.hour}:{current.minute}:{current.second}'
+                }
+            ))
+
+            await super(Client, self).send_data(where=self.socket, data=encrypted_data)
 
     async def main(self):
         await asyncio.gather(
-            self.main_loop.create_task(self.listen_socket()),
+            self.main_loop.create_task(self.listen_socket(self.socket)),
             self.main_loop.create_task(self.send_data()),
         )
 
